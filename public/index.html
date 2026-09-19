@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JustPreview — Live</title>
+<title>JustPreview — Trending Movies, Trailers & Where to Stream</title>
+<meta name="description" content="Browse trending and now-playing movies, watch trailers, see cast and ratings, and find where to stream each title. Live data powered by TMDB.">
+<link rel="canonical" href="https://just-preview.onrender.com/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="JustPreview — Trending Movies, Trailers & Where to Stream">
+<meta property="og:description" content="Browse trending and now-playing movies, watch trailers, and find where to stream each title.">
+<meta property="og:url" content="https://just-preview.onrender.com/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -14,6 +20,9 @@
   header{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--rule); padding-bottom:18px; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
   .brand{ font-weight:800; font-size:1.8rem; }
   .brand span{ color:var(--accent); }
+  .live-dot{ display:inline-block; width:8px; height:8px; background:#22c55e; border-radius:50%; margin-right:6px; animation:pulse 1.5s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+  .status{ font-size:0.8rem; color:var(--text-dim); }
   .search-row{ display:flex; gap:10px; margin-bottom:26px; }
   input[type="search"]{ flex:1; min-width:0; background:var(--bg-panel); border:1px solid var(--rule); color:var(--text); padding:12px 14px; font-size:0.95rem; border-radius:6px; }
   button{ background:var(--accent); color:#04211d; border:none; padding:12px 20px; font-weight:700; cursor:pointer; border-radius:6px; font-family:inherit; }
@@ -26,7 +35,7 @@
   .tab.active{ background:var(--accent); color:#04211d; border-color:var(--accent); font-weight:700; }
   .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px 10px; }
   @media (max-width:480px){ .grid{ grid-template-columns:repeat(2,1fr); gap:10px 8px; } .frame{ padding:20px 12px 60px; } }
-  .card{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .card{ cursor:pointer; -webkit-tap-highlight-color:transparent; color:inherit; text-decoration:none; display:block; }
   .thumb{ position:relative; border-radius:10px; overflow:hidden; background:#132323; transition:transform .1s; }
   .card:active .thumb{ transform:scale(.98); }
   .thumb img{ width:100%; aspect-ratio:2/3; object-fit:cover; display:block; }
@@ -72,10 +81,11 @@
 <div class="frame">
   <header>
     <div class="brand">Just<span>Preview</span> <small style="font-size:0.9rem;color:var(--text-dim);">Live</small></div>
+    <div class="status"><span class="live-dot"></span>Connected to your backend</div>
   </header>
 
   <div class="search-row">
-    <input type="search" id="q" placeholder="Search any movie…">
+    <input type="search" id="q" placeholder="Search any movie (live TMDB database)…">
     <button id="searchBtn">Search</button>
   </div>
 
@@ -86,6 +96,11 @@
   </div>
 
   <div id="content" class="grid"></div>
+
+  <section style="margin-top:40px;padding-top:16px;border-top:1px solid var(--rule);color:var(--text-dim);font-size:0.85rem;line-height:1.6;">
+    <h2 style="color:var(--text);font-size:1rem;">About JustPreview</h2>
+    <p>JustPreview is a free movie discovery tool. Browse what's trending this week and what's currently in theatres, search any title, and open a movie to see its trailer, cast, rating, and where it's available to stream, rent, or buy near you. Save titles you want to watch later to your personal watchlist.</p>
+  </section>
 
   <footer class="attrib">This product uses the TMDB API but is not endorsed or certified by TMDB.</footer>
 </div>
@@ -172,12 +187,12 @@ function renderMovies(movies, emptyMsg){
     const saved = currentTab !== 'watchlist' && watchIds.has(+m.id) ? ' saved' : '';
     const rate = m.rating ? `<span class="rate">★ ${Number(m.rating).toFixed(1)}</span>` : '';
     return `
-    <div class="card${saved}" data-id="${esc(m.id)}" role="button" aria-label="${title}">
+    <a class="card${saved}" href="/movie/${esc(m.id)}" data-id="${esc(m.id)}" aria-label="${title}">
       <div class="thumb">${poster
         ? `<img src="${esc(poster)}" alt="${title}" loading="lazy">`
         : `<div class="noposter">${title}</div>`}</div>
       <div class="meta">${rate}<span>${esc(m.year)}</span></div>
-    </div>`;
+    </a>`;
   }).join('');
 }
 
@@ -320,7 +335,10 @@ async function openDetails(id){
 
 content.addEventListener('click', e => {
   const card = e.target.closest('.card');
-  if(card) openDetails(+card.dataset.id);
+  if(!card) return;
+  if(e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; // let the browser open it normally
+  e.preventDefault();
+  openDetails(+card.dataset.id);
 });
 
 // ---------- watchlist add / remove (from the details sheet) ----------
