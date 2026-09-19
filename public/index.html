@@ -81,12 +81,11 @@
 <body>
 <div class="frame">
   <header>
-    <div class="brand">Just<span>Preview</span> <small style="font-size:0.9rem;color:var(--text-dim);">Live</small></div>
-    <div class="status"><span class="live-dot"></span>Connected to your backend</div>
+    <div class="brand">Just<span>Preview</span></div>
   </header>
 
   <div class="search-row">
-    <input type="search" id="q" placeholder="Search any movie (live TMDB database)…">
+    <input type="search" id="q" placeholder="Search any movie…">
     <button id="searchBtn">Search</button>
   </div>
 
@@ -284,8 +283,11 @@ function providersHtml(d){
     .filter(([k]) => Array.isArray(pr[k]) && pr[k].length)
     .map(([k, l]) => `<div class="prov-group"><div class="prov-label">${l}</div>${chipsHtml(pr[k])}</div>`);
   const region = d.region === 'IN' ? 'India' : d.region;
+  const link = d.watchLink
+    ? `<a class="btn" style="margin-top:10px;display:inline-block;" href="${esc(d.watchLink)}" target="_blank" rel="noopener noreferrer nofollow">View all options &rarr;</a>`
+    : '';
   return `<div class="d-sec"><h3>Where to watch (${esc(region)})</h3>` +
-    (groups.length ? groups.join('') : '<div class="d-meta">No streaming info available right now.</div>') +
+    (groups.length ? groups.join('') + link : '<div class="d-meta">No streaming info available right now.</div>') +
     '<div class="credit">Streaming data by JustWatch</div></div>';
 }
 
