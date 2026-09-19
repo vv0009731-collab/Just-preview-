@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JustPreview — Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#0a1414; --bg-panel:#0f1e1e; --accent:#2dd4bf; --accent-dim:#1a8f80; --text:#eafaf7; --text-dim:#8fada8; --rule:#1c3230; }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:'Manrope',system-ui,sans-serif; }
+  .frame{ max-width:1100px; margin:0 auto; padding:32px 20px 80px; }
+  header{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--rule); padding-bottom:18px; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+  .brand{ font-weight:800; font-size:1.8rem; }
+  .brand span{ color:var(--accent); }
+  .live-dot{ display:inline-block; width:8px; height:8px; background:#22c55e; border-radius:50%; margin-right:6px; animation:pulse 1.5s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+  .status{ font-size:0.8rem; color:var(--text-dim); }
+  .search-row{ display:flex; gap:10px; margin-bottom:26px; }
+  input[type="search"]{ flex:1; background:var(--bg-panel); border:1px solid var(--rule); color:var(--text); padding:12px 14px; font-size:0.95rem; border-radius:6px; }
+  button{ background:var(--accent); color:#04211d; border:none; padding:12px 20px; font-weight:700; cursor:pointer; border-radius:6px; font-family:inherit; }
+  .tabs{ display:flex; gap:8px; margin-bottom:20px; }
+  .tab{ padding:8px 16px; border:1px solid var(--rule); border-radius:6px; cursor:pointer; font-size:0.85rem; color:var(--text-dim); background:transparent; }
+  .tab.active{ background:var(--accent); color:#04211d; border-color:var(--accent); font-weight:700; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:16px; }
+  .card{ background:var(--bg-panel); border:1px solid var(--rule); border-radius:8px; overflow:hidden; cursor:pointer; }
+  .card img{ width:100%; aspect-ratio:2/3; object-fit:cover; display:block; background:#132323; }
+  .card-body{ padding:10px; }
+  .card-title{ font-size:0.85rem; font-weight:700; line-height:1.2; margin-bottom:4px; }
+  .card-year{ font-size:0.75rem; color:var(--text-dim); }
+  .loading, .error{ text-align:center; padding:40px; color:var(--text-dim); }
+  .error{ color:#f87171; }
+  .card.saved{ outline:2px solid #22c55e; outline-offset:-2px; }
+  #toast{ position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px); background:var(--bg-panel); color:var(--text); border:1px solid var(--rule); padding:10px 16px; border-radius:8px; font-size:0.85rem; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:10; max-width:90vw; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #toast.err{ border-color:#f87171; color:#f87171; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <header>
+    <div class="brand">Just<span>Preview</span> <small style="font-size:0.9rem;color:var(--text-dim);">Live</small></div>
+    <div class="status"><span class="live-dot"></span>Connected to your backend</div>
+  </header>
+
+  <div class="search-row">
+    <input type="search" id="q" placeholder="Search any movie (live TMDB database)…">
+    <button id="searchBtn">Search</button>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="trending">🔥 Trending this week</button>
+    <button class="tab" data-tab="now-playing">🎬 Now playing</button>
+    <button class="tab" data-tab="watchlist">⭐ My watchlist</button>
+  </div>
+
+  <div id="content" class="grid"></div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const content = document.getElementById('content');
+const q = document.getElementById('q');
+const toastEl = document.getElementById('toast');
+
+let currentTab = 'trending';   // 'trending' | 'now-playing' | 'watchlist' | 'search'
+let watchIds = new Set();      // ids already in the watchlist
+let reqId = 0;                 // guards against stale responses overwriting newer ones
+let toastTimer;
+
+// ---------- helpers ----------
+function esc(s){
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function safeUrl(u){ return /^https?:\/\//i.test(u || '') ? u : ''; }
+
+function toast(msg, isErr){
+  toastEl.textContent = msg;
+  toastEl.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ toastEl.className = ''; }, 2200);
+}
+
+async function api(path, opts){
+  const res = await fetch('/api/' + path, opts);
+  let data = null;
+  try{ data = await res.json(); }catch(_){ /* empty or non-JSON body */ }
+  if(!res.ok) throw new Error((data && data.error) || ('Request failed (' + res.status + ')'));
+  return data;
+}
+
+async function refreshWatchIds(){
+  try{
+    const rows = await api('watchlist');
+    watchIds = new Set((rows || []).map(r => +r.id));
+  }catch(_){ /* non-fatal: cards just won't show the saved outline */ }
+}
+
+// ---------- rendering ----------
+function renderMovies(movies, emptyMsg){
+  if(!movies || !movies.length){
+    content.innerHTML = '<div class="loading">' + esc(emptyMsg || 'No results.') + '</div>';
+    return;
+  }
+  content.innerHTML = movies.map(m => {
+    const title = esc(m.title);
+    const poster = safeUrl(m.poster);
+    const saved = currentTab !== 'watchlist' && watchIds.has(+m.id) ? ' saved' : '';
+    const rating = m.rating ? ' · ★ ' + Number(m.rating).toFixed(1) : '';
+    return `
+    <div class="card${saved}" data-id="${esc(m.id)}" data-title="${title}" data-year="${esc(m.year)}" data-poster="${esc(poster)}">
+      ${poster
+        ? `<img src="${esc(poster)}" alt="${title}">`
+        : `<div style="aspect-ratio:2/3;display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.8rem;padding:10px;text-align:center;">${title}</div>`}
+      <div class="card-body">
+        <div class="card-title">${title}</div>
+        <div class="card-year">${esc(m.year)}${rating}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- tabs ----------
+async function loadTab(tab){
+  currentTab = tab;
+  const my = ++reqId;
+  content.innerHTML = '<div class="loading">Loading live data…</div>';
+  try{
+    let movies;
+    if(tab === 'watchlist'){
+      const rows = await api('watchlist');
+      watchIds = new Set(rows.map(r => +r.id));
+      movies = rows.map(r => ({ id:r.id, title:r.title, year:r.year, poster:r.poster_path }));
+    } else {
+      const [list] = await Promise.all([ api(tab), refreshWatchIds() ]);  // 'trending' / 'now-playing'
+      movies = list;
+    }
+    if(my !== reqId) return;   // a newer request has started, ignore this one
+    renderMovies(movies, tab === 'watchlist' ? 'Your watchlist is empty.' : 'No results.');
+  }catch(e){
+    if(my !== reqId) return;
+    content.innerHTML = `<div class="error">Couldn't load data — is the backend running with a valid TMDB_ACCESS_TOKEN? (${esc(e.message)})</div>`;
+  }
+}
+
+document.querySelectorAll('.tab').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    loadTab(btn.dataset.tab);
+  });
+});
+
+// ---------- search ----------
+document.getElementById('searchBtn').addEventListener('click', doSearch);
+q.addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
+
+async function doSearch(){
+  const query = q.value.trim();
+  if(!query) return;
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  currentTab = 'search';   // FIX: previously stayed on old tab, so clicking a result on 'watchlist' deleted instead of adding
+  const my = ++reqId;
+  content.innerHTML = '<div class="loading">Searching live database…</div>';
+  try{
+    const [results] = await Promise.all([ api('search?q=' + encodeURIComponent(query)), refreshWatchIds() ]);
+    if(my !== reqId) return;
+    renderMovies(results);
+  }catch(e){
+    if(my !== reqId) return;
+    content.innerHTML = `<div class="error">Search failed: ${esc(e.message)}</div>`;
+  }
+}
+
+// ---------- watchlist add / remove ----------
+content.addEventListener('click', async (e)=>{
+  const card = e.target.closest('.card');
+  if(!card || card.dataset.busy) return;
+  const id = +card.dataset.id;
+  card.dataset.busy = '1';
+  try{
+    if(currentTab === 'watchlist'){
+      await api('watchlist/' + id, { method:'DELETE' });
+      watchIds.delete(id);
+      card.remove();
+      toast('Removed from watchlist');
+      if(!content.querySelector('.card')){
+        content.innerHTML = '<div class="loading">Your watchlist is empty.</div>';
+      }
+    } else if(watchIds.has(id)){
+      toast('Already in your watchlist');
+    } else {
+      await api('watchlist', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id, title:card.dataset.title, year:card.dataset.year, poster_path:card.dataset.poster })
+      });
+      watchIds.add(id);
+      card.classList.add('saved');
+      toast('Added to watchlist ⭐');
+    }
+  }catch(err){
+    toast('Failed: ' + err.message, true);
+  }finally{
+    delete card.dataset.busy;
+  }
+});
+
+loadTab('trending');
+</script>
+</body>
+</html>
