@@ -1,0 +1,13 @@
+{
+  "name": "justpreview",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JustPreview - TMDB movie browser with a small Node backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
