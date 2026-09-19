@@ -233,7 +233,13 @@ ${poster ? `<meta property="og:image" content="${escHtml(poster)}">` : ''}
 }
 
 function buildSitemapXml(ids) {
-  const urls = [`${SITE_URL}/`, ...ids.map((id) => `${SITE_URL}/movie/${id}`)];
+  const urls = [
+    `${SITE_URL}/`,
+    `${SITE_URL}/about.html`,
+    `${SITE_URL}/privacy.html`,
+    `${SITE_URL}/contact.html`,
+    ...ids.map((id) => `${SITE_URL}/movie/${id}`),
+  ];
   const body = urls.map((u) => `  <url><loc>${escHtml(u)}</loc></url>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`;
 }
