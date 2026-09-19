@@ -23,6 +23,7 @@ const TMDB_BASE = process.env.TMDB_BASE || 'https://api.themoviedb.org/3';
 const IMG_BASE = 'https://image.tmdb.org/t/p/w342';
 const LOGO_BASE = 'https://image.tmdb.org/t/p/w92';
 const WATCH_REGION = (process.env.WATCH_REGION || 'IN').toUpperCase();   // country for "where to watch"
+const SITE_URL = (process.env.SITE_URL || 'https://just-preview.onrender.com').replace(/\/$/, '');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'watchlist.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -33,6 +34,28 @@ function httpError(status, message) {
   const e = new Error(message);
   e.status = status;
   return e;
+}
+
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function sendHtml(res, status, html) {
+  res.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(html);
+}
+
+function sendXml(res, status, xml) {
+  res.writeHead(status, {
+    'Content-Type': 'application/xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+  res.end(xml);
 }
 
 function sendJson(res, status, body) {
@@ -136,6 +159,81 @@ function shapeDetail(d) {
     region: WATCH_REGION,
     providers,
   };
+}
+
+// ---------- SEO: server-rendered movie page ----------
+function renderMoviePage(d) {
+  const title = d.title || 'Untitled';
+  const year = d.year || '';
+  const pageTitle = `${title}${year ? ' (' + year + ')' : ''} — Watch Trailer & Where to Stream | JustPreview`;
+  const description = (d.overview || `Details, cast, trailer and streaming availability for ${title}.`).slice(0, 155);
+  const poster = d.poster || '';
+  const canonical = `${SITE_URL}/movie/${d.id}`;
+  const genres = (d.genres || []).join(', ');
+  const cast = (d.cast || []).map((c) => c.name).filter(Boolean).slice(0, 8).join(', ');
+  const providers = Object.values(d.providers || {}).flat().map((p) => p.name).filter(Boolean);
+  const providerList = [...new Set(providers)].join(', ');
+
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Movie',
+    name: title,
+    description: d.overview || undefined,
+    image: poster || undefined,
+    dateCreated: year || undefined,
+    genre: d.genres && d.genres.length ? d.genres : undefined,
+    aggregateRating: d.rating ? {
+      '@type': 'AggregateRating',
+      ratingValue: Number(d.rating).toFixed(1),
+      bestRating: '10',
+    } : undefined,
+    actor: d.cast && d.cast.length
+      ? d.cast.slice(0, 8).map((c) => ({ '@type': 'Person', name: c.name }))
+      : undefined,
+  };
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escHtml(pageTitle)}</title>
+<meta name="description" content="${escHtml(description)}">
+<link rel="canonical" href="${escHtml(canonical)}">
+<meta property="og:type" content="video.movie">
+<meta property="og:title" content="${escHtml(title)}">
+<meta property="og:description" content="${escHtml(description)}">
+${poster ? `<meta property="og:image" content="${escHtml(poster)}">` : ''}
+<meta property="og:url" content="${escHtml(canonical)}">
+<meta name="twitter:card" content="summary_large_image">
+<style>body{margin:0;background:#0a1414;color:#eafaf7;font-family:system-ui,sans-serif;line-height:1.5}.frame{max-width:700px;margin:0 auto;padding:24px 20px 60px}.d-head{display:flex;gap:16px;margin-bottom:12px}.d-head img{border-radius:8px;flex:none}a{color:#2dd4bf}</style>
+<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>
+</head>
+<body>
+<div class="frame">
+  <p><a href="/">&larr; Back to JustPreview</a></p>
+  <div class="d-head">
+    ${poster ? `<img src="${escHtml(poster)}" alt="${escHtml(title)} poster" width="220">` : ''}
+    <div>
+      <h1>${escHtml(title)}${year ? ` (${escHtml(year)})` : ''}</h1>
+      <p>${[d.runtime ? d.runtime + ' min' : '', genres, d.rating ? 'Rating: ' + Number(d.rating).toFixed(1) + '/10' : ''].filter(Boolean).map(escHtml).join(' · ')}</p>
+    </div>
+  </div>
+  ${d.tagline ? `<p><em>${escHtml(d.tagline)}</em></p>` : ''}
+  <h2>Overview</h2>
+  <p>${escHtml(d.overview || 'No summary available yet.')}</p>
+  ${cast ? `<h2>Cast</h2><p>${escHtml(cast)}</p>` : ''}
+  ${providerList ? `<h2>Where to watch in ${escHtml(d.region || 'your region')}</h2><p>${escHtml(providerList)}</p>` : ''}
+  <p><a href="/">Open ${escHtml(title)} in the JustPreview app &rarr;</a></p>
+</div>
+</body>
+</html>`;
+}
+
+function buildSitemapXml(ids) {
+  const urls = [`${SITE_URL}/`, ...ids.map((id) => `${SITE_URL}/movie/${id}`)];
+  const body = urls.map((u) => `  <url><loc>${escHtml(u)}</loc></url>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`;
 }
 
 // ---------- watchlist (JSON file) ----------
@@ -253,6 +351,26 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/health') return sendJson(res, 200, { ok: true });
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     if (req.method !== 'GET' && req.method !== 'HEAD') throw httpError(405, 'Method not allowed');
+
+    if (url.pathname === '/robots.txt') {
+      return sendHtml(res, 200, `User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+    }
+
+    if (url.pathname === '/sitemap.xml') {
+      const [trending, nowPlaying] = await Promise.all([
+        tmdb('/trending/movie/week', 5 * 60 * 1000).catch(() => ({ results: [] })),
+        tmdb('/movie/now_playing', 5 * 60 * 1000).catch(() => ({ results: [] })),
+      ]);
+      const ids = [...new Set([...(trending.results || []), ...(nowPlaying.results || [])].map((m) => m.id))];
+      return sendXml(res, 200, buildSitemapXml(ids));
+    }
+
+    const moviePage = url.pathname.match(/^\/movie\/(\d+)(?:-[\w-]*)?$/);
+    if (moviePage) {
+      const d = await tmdb('/movie/' + moviePage[1] + '?append_to_response=videos,credits,watch/providers&include_video_language=en,hi,null', 10 * 60 * 1000);
+      return sendHtml(res, 200, renderMoviePage(shapeDetail(d)));
+    }
+
     return await serveStatic(res, url.pathname);
   } catch (e) {
     if (!e.status) console.error(e);
