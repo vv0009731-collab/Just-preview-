@@ -147,6 +147,7 @@ function shapeDetail(d) {
       }));
     }
   }
+  const watchLink = raw.link || '';
 
   return {
     ...shape(d),
@@ -158,6 +159,7 @@ function shapeDetail(d) {
     trailer: pick ? { key: pick.key, name: pick.name } : null,
     region: WATCH_REGION,
     providers,
+    watchLink,
   };
 }
 
@@ -223,7 +225,7 @@ ${poster ? `<meta property="og:image" content="${escHtml(poster)}">` : ''}
   <h2>Overview</h2>
   <p>${escHtml(d.overview || 'No summary available yet.')}</p>
   ${cast ? `<h2>Cast</h2><p>${escHtml(cast)}</p>` : ''}
-  ${providerList ? `<h2>Where to watch in ${escHtml(d.region || 'your region')}</h2><p>${escHtml(providerList)}</p>` : ''}
+  ${providerList ? `<h2>Where to watch in ${escHtml(d.region || 'your region')}</h2><p>${escHtml(providerList)}</p>${d.watchLink ? `<p><a href="${escHtml(d.watchLink)}" target="_blank" rel="noopener noreferrer nofollow">View streaming options &rarr;</a></p>` : ''}` : ''}
   <p><a href="/">Open ${escHtml(title)} in the JustPreview app &rarr;</a></p>
 </div>
 </body>
