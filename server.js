@@ -21,6 +21,8 @@ const PORT = process.env.PORT || 3000;
 const TOKEN = process.env.TMDB_ACCESS_TOKEN;
 const TMDB_BASE = process.env.TMDB_BASE || 'https://api.themoviedb.org/3';
 const IMG_BASE = 'https://image.tmdb.org/t/p/w342';
+const LOGO_BASE = 'https://image.tmdb.org/t/p/w92';
+const WATCH_REGION = (process.env.WATCH_REGION || 'IN').toUpperCase();   // country for "where to watch"
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'watchlist.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -81,6 +83,7 @@ async function tmdb(pathAndQuery, ttlMs = 0) {
   } catch (_) {
     throw httpError(502, 'Could not reach TMDB');
   }
+  if (res.status === 404) throw httpError(404, 'Not found on TMDB');
   if (!res.ok) {
     throw httpError(502, res.status === 401
       ? 'TMDB rejected the token (401) — check TMDB_ACCESS_TOKEN'
@@ -102,6 +105,38 @@ const shape = (m) => ({
   poster: m.poster_path ? IMG_BASE + m.poster_path : '',
   rating: m.vote_average || 0,
 });
+
+// Full details for one movie: overview, cast, trailer, streaming providers
+function shapeDetail(d) {
+  const vids = ((d.videos || {}).results || [])
+    .filter((v) => v.site === 'YouTube' && /^[\w-]{6,20}$/.test(v.key || ''));
+  const pick = vids.find((v) => v.type === 'Trailer' && v.official)
+    || vids.find((v) => v.type === 'Trailer')
+    || vids.find((v) => v.type === 'Teaser');
+
+  const raw = (((d['watch/providers'] || {}).results || {})[WATCH_REGION]) || {};
+  const providers = {};
+  for (const k of ['flatrate', 'free', 'ads', 'rent', 'buy']) {
+    if (Array.isArray(raw[k]) && raw[k].length) {
+      providers[k] = raw[k].slice(0, 8).map((p) => ({
+        name: p.provider_name,
+        logo: p.logo_path ? LOGO_BASE + p.logo_path : '',
+      }));
+    }
+  }
+
+  return {
+    ...shape(d),
+    runtime: d.runtime || 0,
+    tagline: d.tagline || '',
+    overview: d.overview || '',
+    genres: (d.genres || []).map((g) => g.name),
+    cast: ((d.credits || {}).cast || []).slice(0, 10).map((c) => ({ name: c.name, character: c.character || '' })),
+    trailer: pick ? { key: pick.key, name: pick.name } : null,
+    region: WATCH_REGION,
+    providers,
+  };
+}
 
 // ---------- watchlist (JSON file) ----------
 let watchlist = [];
@@ -142,6 +177,12 @@ async function handleApi(req, res, url) {
     if (q.length > 100) throw httpError(400, 'Search query too long');
     const d = await tmdb('/search/movie?include_adult=false&query=' + encodeURIComponent(q), 60 * 1000);
     return sendJson(res, 200, (d.results || []).map(shape));
+  }
+
+  const mv = p.match(/^\/api\/movie\/(\d+)$/);
+  if (mv && req.method === 'GET') {
+    const d = await tmdb('/movie/' + mv[1] + '?append_to_response=videos,credits,watch/providers&include_video_language=en,hi,null', 10 * 60 * 1000);
+    return sendJson(res, 200, shapeDetail(d));
   }
 
   if (p === '/api/watchlist') {
